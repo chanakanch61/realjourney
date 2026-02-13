@@ -20,6 +20,16 @@ export default function Home() {
             Go to /api/season_holiday
           </Link>
         </li>
+        <li>
+          <Link href="/api/htc" prefetch={false} target="_blank">
+            Go to /api/htc
+          </Link>
+        </li>
+        <li>
+          <Link href="/api/totw" prefetch={false} target="_blank">
+            Go to /api/totw
+          </Link>
+        </li>
       </ul>
     </main>
   );
