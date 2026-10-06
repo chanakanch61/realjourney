@@ -3,7 +3,13 @@
 ## Formosa API
 
 Requires Node.js 22 or newer. Install dependencies with `npm install`.
-Set the following in `.env.local` locally, or in the deployment environment:
+Configure `FORMOSA_CONFIG` near the top of `app/api/formosa/route.js` directly:
+`proxyToken` contains the generated API secret; paste your authenticated Formosa
+Cookie request-header value into `cookie`. Call the API with that `proxyToken`.
+Restart locally or redeploy after changing these settings.
+
+Optionally, the following in `.env.local` or the deployment environment override
+the code settings:
 
 ```dotenv
 FORMOSA_PROXY_TOKEN=replace-with-your-own-secret
@@ -12,7 +18,7 @@ FORMOSA_COOKIE="replace-with-a-valid-formosa-session-cookie"
 
 Send `Authorization: Bearer <FORMOSA_PROXY_TOKEN>` to `/api/formosa`.
 The cookie must come from an authenticated Formosa session; update it when the
-API reports `session_expired_update_FORMOSA_COOKIE`. Never commit these values.
+API reports `session_expired_update_FORMOSA_COOKIE`.
 
 - `/api/formosa?country=6&page=1`: fetch one page (pages 1–50 supported).
 - `/api/formosa?country=6`: fetch one country until an empty page.

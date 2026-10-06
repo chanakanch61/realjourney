@@ -26,7 +26,7 @@ test('Formosa route with real parser and cookie jar, mocked upstream', async (t)
     }
   });
   await t.test('configuration, authentication and invalid query guards', async () => {
-    delete process.env.FORMOSA_PROXY_TOKEN;
+    process.env.FORMOSA_PROXY_TOKEN = '';
     assert.equal((await GET(request())).status, 503);
     process.env.FORMOSA_PROXY_TOKEN = 'test-token';
     process.env.FORMOSA_COOKIE = 'session=test';

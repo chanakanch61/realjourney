@@ -1,6 +1,6 @@
 // Copy to app/api/formosa/route.js (Next.js App Router, Node.js 22+).
 // npm install cheerio tough-cookie
-// Env: FORMOSA_COOKIE and FORMOSA_PROXY_TOKEN (a secret you choose, not a Formosa API key).
+// Configure FORMOSA_CONFIG below. Optional ENV values override the code settings.
 // Authorization: Bearer <FORMOSA_PROXY_TOKEN>
 // No query: all countries, three countries at a time, until an empty page.
 // ?country=6: all pages for China; ?country=6&page=1: just one page.
@@ -11,6 +11,12 @@ import { timingSafeEqual } from 'node:crypto';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
+
+// Server-side settings. Paste the Cookie request-header value from a logged-in Formosa session.
+const FORMOSA_CONFIG = {
+  proxyToken: 'a6184d11571c1ec0874d9086099ca2ede0820d4ff0a87850e1a355a9ffe3bf9e',
+  cookie: 'wordpress_test_cookie=WP%20Cookie%20check; breeze_folder_name=d32cf666487fbc75b4d32e4b855a9bbff24514e1; wordpress_logged_in_2a83a54d58f34f172a794744fd383444=travelzeed%7C1792296400%7C27RLH5Bt8iqEFnU3gPNllF2sB16VBhKoWUyCb59UK6n%7Cd53d34c25c310b6ffc238739c0a9771f00f7022149d3200a9038fdc7a6001117', // Paste the real Formosa cookie here (without the "Cookie:" prefix).
+};
 
 const ORIGIN = 'https://formosajourneyland.co.th';
 const MAX_PAGES = 50;
@@ -87,8 +93,9 @@ function parseTours(html, country, page) {
 }
 
 export async function GET(request) {
-  const secret = process.env.FORMOSA_PROXY_TOKEN;
-  if (!secret || !process.env.FORMOSA_COOKIE) return json({ ok: false, error: 'server_configuration_missing' }, 503);
+  const secret = process.env.FORMOSA_PROXY_TOKEN ?? FORMOSA_CONFIG.proxyToken;
+  const cookie = process.env.FORMOSA_COOKIE ?? FORMOSA_CONFIG.cookie;
+  if (!secret || !cookie) return json({ ok: false, error: 'server_configuration_missing' }, 503);
   const expected = Buffer.from(`Bearer ${secret}`);
   const received = Buffer.from(request.headers.get('authorization') || '');
   if (expected.length !== received.length || !timingSafeEqual(expected, received)) return json({ ok: false, error: 'unauthorized' }, 401);
@@ -103,7 +110,7 @@ export async function GET(request) {
   const deadline = Date.now() + 50_000;
   const stop = new AbortController();
   try {
-    for (const part of process.env.FORMOSA_COOKIE.split(';')) {
+    for (const part of cookie.split(';')) {
       if (part.trim()) await jar.setCookie(`${part.trim()}; Path=/; Secure`, ORIGIN);
     }
     async function upstream(path, fields = null) {
