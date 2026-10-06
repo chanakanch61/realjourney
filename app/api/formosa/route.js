@@ -2,8 +2,8 @@
 // npm install cheerio tough-cookie
 // Env: FORMOSA_COOKIE and FORMOSA_PROXY_TOKEN (a secret you choose, not a Formosa API key).
 // Authorization: Bearer <FORMOSA_PROXY_TOKEN>
-// No query: all countries, up to six pages each (same limit as connectApiProtocol).
-// ?country=6: all six pages for China; ?country=6&page=1: just one page.
+// No query: all countries, three countries at a time, until an empty page.
+// ?country=6: all pages for China; ?country=6&page=1: just one page.
 import { load } from 'cheerio';
 import { CookieJar } from 'tough-cookie';
 import { timingSafeEqual } from 'node:crypto';
@@ -13,6 +13,7 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 const ORIGIN = 'https://formosajourneyland.co.th';
+const MAX_PAGES = 50;
 const COUNTRIES = ['6', '27', '28', '15', '7', '13', '25', '14', '10', '12', '219', '216', '229', '262'];
 const NO_RESULTS = new Set(['', 'ไม่พบข้อมูล', 'ไม่พบโปรแกรมทัวร์ที่คุณค้นหา']);
 const digits = (value) => value.replace(/[^0-9]/g, '');
@@ -95,27 +96,28 @@ export async function GET(request) {
   const country = params.get('country') ?? (params.has('page') ? '6' : 'all');
   const pageValue = params.get('page');
   if ((country !== 'all' && !COUNTRIES.includes(country)) ||
-      (pageValue !== null && !/^[1-6]$/.test(pageValue)) || (country === 'all' && pageValue !== null)) {
-    return json({ ok: false, error: 'invalid_country_or_page', countries: COUNTRIES, page_range: '1-6' }, 400);
+      (pageValue !== null && (!/^[1-9]\d*$/.test(pageValue) || Number(pageValue) > MAX_PAGES)) || (country === 'all' && pageValue !== null)) {
+    return json({ ok: false, error: 'invalid_country_or_page', countries: COUNTRIES, page_range: `1-${MAX_PAGES}` }, 400);
   }
   const jar = new CookieJar(); // Per request: do not share user sessions globally.
   const deadline = Date.now() + 50_000;
-  let diagnostics = {};
+  const stop = new AbortController();
   try {
     for (const part of process.env.FORMOSA_COOKIE.split(';')) {
       if (part.trim()) await jar.setCookie(`${part.trim()}; Path=/; Secure`, ORIGIN);
     }
     async function upstream(path, fields = null) {
+      const stage = fields ? 'agent_ajax' : 'nonce_page';
+      let diagnostics = { stage, ...(fields ? { country: fields.tour_tax_val, page: Number(fields.paged) } : {}) };
       const remaining = deadline - Date.now();
       if (remaining <= 0) throw new FormosaError('fetch_deadline_exceeded_use_country_or_page', 504, diagnostics);
       const url = `${ORIGIN}${path}`;
-      const stage = fields ? 'agent_ajax' : 'nonce_page';
-      diagnostics = { stage };
       const controller = new AbortController();
       const abort = () => controller.abort();
       const timer = setTimeout(abort, Math.min(15_000, remaining));
       request.signal.addEventListener('abort', abort, { once: true });
-      if (request.signal.aborted) controller.abort();
+      stop.signal.addEventListener('abort', abort, { once: true });
+      if (request.signal.aborted || stop.signal.aborted) controller.abort();
       try {
         const response = await fetch(url, {
           method: fields ? 'POST' : 'GET', redirect: 'manual', cache: 'no-store', signal: controller.signal,
@@ -128,7 +130,7 @@ export async function GET(request) {
         });
         for (const cookie of response.headers.getSetCookie()) await jar.setCookie(cookie, url);
         const ray = response.headers.get('cf-ray') || '';
-        diagnostics = { stage, http_status: response.status, cf_ray: /^[a-f0-9]{8,32}-[a-z]{3}$/i.test(ray) ? ray : null };
+        diagnostics = { ...diagnostics, http_status: response.status, cf_ray: /^[a-f0-9]{8,32}-[a-z]{3}$/i.test(ray) ? ray : null };
         const body = await response.text();
         if (response.headers.get('cf-mitigated') === 'challenge' || /cf-chl-|\/cdn-cgi\/challenge-platform|<title>\s*(Just a moment|Attention Required)/i.test(body)) {
           throw new FormosaError('upstream_challenge', 502, diagnostics);
@@ -137,17 +139,19 @@ export async function GET(request) {
           throw new FormosaError('session_expired_update_FORMOSA_COOKIE', 502, diagnostics);
         }
         if (response.status >= 300 && response.status < 400) throw new FormosaError('upstream_redirect_check_session', 502, diagnostics);
-        return { status: response.status, body };
+        return { status: response.status, body, diagnostics };
       } catch (error) {
         if (error instanceof FormosaError) throw error;
         throw new FormosaError(controller.signal.aborted ? 'upstream_timeout_or_cancelled' : 'upstream_connection_failed', controller.signal.aborted ? 504 : 502, diagnostics);
       } finally {
         clearTimeout(timer);
         request.signal.removeEventListener('abort', abort);
+        stop.signal.removeEventListener('abort', abort);
       }
     }
     async function getNonce() {
       const response = await upstream('/agent-tour-category/?tour_country=6');
+      const { diagnostics } = response;
       if (response.status !== 200) throw new FormosaError('nonce_page_http_' + response.status, 502, diagnostics);
       const match = response.body.match(/\b(?:var|let|const)\s+agent_ajax_object\s*=\s*(\{[^;]+\})\s*;/);
       let config;
@@ -156,14 +160,23 @@ export async function GET(request) {
       return config.nonce;
     }
     let nonce = await getNonce();
+    let nonceRefresh;
     async function getPage(countryId, page) {
       for (let attempt = 0; attempt < 2; attempt++) {
+        const sentNonce = nonce;
         const response = await upstream('/wp-admin/admin-ajax.php', {
-          action: 'tour_callback_agent_country', nonce, tour_keyword: '', tour_city: '', tour_month: '',
+          action: 'tour_callback_agent_country', nonce: sentNonce, tour_keyword: '', tour_city: '', tour_month: '',
           tour_tax: 'tour-country', tour_tax_val: countryId, tour_cat: '', tour_sort: '', paged: String(page),
         });
+        const { diagnostics } = response;
         if ([200, 403].includes(response.status) && response.body.trim() === '-1') {
-          if (attempt === 0) { nonce = await getNonce(); continue; }
+          if (attempt === 0) {
+            if (nonce === sentNonce) {
+              nonceRefresh ??= getNonce().then((value) => { nonce = value; }).finally(() => { nonceRefresh = undefined; });
+              await nonceRefresh;
+            }
+            continue;
+          }
           throw new FormosaError('agent_nonce_rejected_after_refresh', 502, diagnostics);
         }
         if (response.status !== 200) throw new FormosaError('agent_ajax_http_' + response.status, 502, diagnostics);
@@ -173,18 +186,37 @@ export async function GET(request) {
         return parseTours(data.result, countryId, page);
       }
     }
-    const tours = new Map();
-    for (const countryId of country === 'all' ? COUNTRIES : [country]) {
+    const countries = country === 'all' ? COUNTRIES : [country];
+    const results = new Map();
+    let nextCountry = 0;
+    async function collectCountry(countryId) {
+      const tours = [];
       const firstPage = pageValue === null ? 1 : Number(pageValue);
-      const lastPage = pageValue === null ? 6 : firstPage;
+      const lastPage = pageValue === null ? MAX_PAGES : firstPage;
       for (let page = firstPage; page <= lastPage; page++) {
         const batch = await getPage(countryId, page);
         if (!batch.length) break;
-        for (const tour of batch) if (!tours.has(tour.mainid)) tours.set(tour.mainid, tour);
+        tours.push(...batch);
+        if (pageValue === null && page === MAX_PAGES) {
+          throw new FormosaError('pagination_limit_exceeded_use_page', 502, { country: countryId, page });
+        }
       }
+      results.set(countryId, tours);
+    }
+    async function worker() {
+      while (!stop.signal.aborted && nextCountry < countries.length) {
+        const countryId = countries[nextCountry++];
+        await collectCountry(countryId);
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(3, countries.length) }, () => worker()));
+    const tours = new Map();
+    for (const countryId of countries) {
+      for (const tour of results.get(countryId)) if (!tours.has(tour.mainid)) tours.set(tour.mainid, tour);
     }
     return json([...tours.values()]);
   } catch (error) {
+    stop.abort();
     // Never return partial tour data, upstream HTML, cookies or nonce values on failure.
     return json({
       ok: false, statusCode: error instanceof FormosaError ? error.status : 502,

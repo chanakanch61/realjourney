@@ -1,5 +1,31 @@
 # Vercel Get Link (Next.js App Router)
 
+## Formosa API
+
+Requires Node.js 22 or newer. Install dependencies with `npm install`.
+Set the following in `.env.local` locally, or in the deployment environment:
+
+```dotenv
+FORMOSA_PROXY_TOKEN=replace-with-your-own-secret
+FORMOSA_COOKIE="replace-with-a-valid-formosa-session-cookie"
+```
+
+Send `Authorization: Bearer <FORMOSA_PROXY_TOKEN>` to `/api/formosa`.
+The cookie must come from an authenticated Formosa session; update it when the
+API reports `session_expired_update_FORMOSA_COOKIE`. Never commit these values.
+
+- `/api/formosa?country=6&page=1`: fetch one page (pages 1–50 supported).
+- `/api/formosa?country=6`: fetch one country until an empty page.
+- `/api/formosa`: fetch all supported countries, at most three concurrently.
+
+Automatic pagination has a safety limit of 50 pages per country and a shared
+50-second request budget. Reaching the limit returns an error, never partial
+success. For timeouts, use separate country or page requests. Successful responses
+remain arrays of tours. Configuration errors return 503; invalid credentials 401;
+invalid query parameters 400; upstream failures 502; timeouts 504.
+
+Run the offline integration checks with `node --test tests/formosa.test.js`.
+
 ## 1) Install
 ```bash
 npm install
