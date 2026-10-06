@@ -30,6 +30,11 @@ export default function Home() {
             Go to /api/totw
           </Link>
         </li>
+           <li>
+          <Link href="/api/formosa" prefetch={false} target="_blank">
+            Go to /api/formosa
+          </Link>
+        </li>
       </ul>
     </main>
   );
