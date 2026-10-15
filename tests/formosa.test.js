@@ -99,6 +99,13 @@ test('parses Thai, emoji, both durations, first table, all flights and separate 
   assert.throws(() => parseTours(article().replace('JP-001', '')), /upstream_tour_id_missing/);
 });
 
+test('size keeps only the capacity before the plus sign', () => {
+  for (const [upstream, expected] of [['15+1', '15'], ['20+1', '20'], ['20 + 1', '20'], ['30', '30']]) {
+    const [tour] = parseTours(article().replace('<td>30</td>', `<td>${upstream}</td>`));
+    assert.equal(tour.period[0].size, expected, upstream);
+  }
+});
+
 test('exact country mapping, POST form encoding and explicit page beyond six', async () => {
   assert.deepEqual(COUNTRIES, {
     china: '6', 'America & Cannada': '27', Europe: '28', Georgia: '15', Japan: '7', Myanmar: '13', Russia: '25',
