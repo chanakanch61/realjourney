@@ -1,0 +1,74 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "Travelzeed Formosa Proxy", "version": "1.0.0" },
+  "paths": {
+    "/api/formosa": {
+      "get": {
+        "operationId": "getFormosaTours",
+        "summary": "Fetch complete Formosa tours, deduplicated by mainid",
+        "description": "No query fetches all 14 countries. country alone fetches every page of that country. page requires country and fetches exactly that page. Stops on an empty result, a recognized Thai empty state without articles, or empty pagination after processing the page. Never returns partial success. Safety limit: 200 pages per country; hitting it with more pagination returns 502. Total upstream budget 50s; individual request budget 30s. Requests run sequentially with a private session cookie jar. Only AJAX -1 (HTTP 200/403) refreshes the nonce and retries the page once. No other automatic retry. All responses are private/no-store and vary on Authorization.",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "country", "in": "query", "description": "Numeric country ID, not a country name; page requires this parameter. Duplicate or unknown query parameters are rejected.", "schema": { "type": "string", "enum": ["6", "27", "28", "15", "7", "13", "25", "14", "10", "12", "219", "216", "229", "262"] } },
+          { "name": "page", "in": "query", "description": "Canonical positive decimal integer (no leading zero), only with country.", "schema": { "type": "integer", "minimum": 1, "maximum": 200 } }
+        ],
+        "responses": {
+          "200": { "description": "Array directly, including [] for genuine empty results; no envelope.", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Tour" } } } } },
+          "400": { "$ref": "#/components/responses/InvalidQuery" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "502": { "description": "Any upstream, markup, nonce, redirect, network, timeout or safety-limit failure. No partial list. cf_ray is included only after syntax validation; its presence does not identify the blocker.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "upstream_http_error", "statusCode": 502, "diagnostics": { "stage": "ajax", "http_status": 403, "cf_ray": "0123456789abcdef-BKK" } } } } },
+          "503": { "description": "Missing or invalid server environment configuration.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": { "bearerAuth": { "type": "http", "scheme": "bearer" } },
+    "responses": {
+      "InvalidQuery": { "description": "Invalid country/page, page without country, duplicate or unknown query parameter.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "invalid_country_or_page", "statusCode": 400 } } } },
+      "Unauthorized": { "description": "Missing or incorrect Bearer token; no upstream request.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "unauthorized", "statusCode": 401 } } } }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object", "additionalProperties": false, "required": ["error", "statusCode"],
+        "properties": {
+          "error": { "type": "string" }, "statusCode": { "type": "integer" },
+          "diagnostics": { "type": "object", "additionalProperties": false, "required": ["stage"], "properties": {
+            "stage": { "type": "string", "enum": ["nonce", "ajax"] }, "http_status": { "type": "integer" },
+            "cf_ray": { "type": "string", "pattern": "^[a-fA-F0-9]{8,32}-[a-zA-Z]{3}$" }
+          } }
+        }
+      },
+      "Tour": {
+        "type": "object", "additionalProperties": false,
+        "required": ["mainid", "title", "banner", "tour_day", "tour_night", "pdf", "doc", "flights", "period"],
+        "properties": {
+          "mainid": { "type": "string", "minLength": 1 }, "title": { "type": "string" }, "banner": { "type": "string" },
+          "tour_day": { "type": "integer" }, "tour_night": { "type": "integer" }, "pdf": { "type": "string" }, "doc": { "type": "string" },
+          "flights": { "type": "array", "items": { "$ref": "#/components/schemas/Flight" } },
+          "period": { "type": "array", "items": { "$ref": "#/components/schemas/Period" } }
+        }
+      },
+      "Flight": {
+        "type": "object", "additionalProperties": false,
+        "required": ["flight_direction", "from_airport", "to_airport", "flight_no", "depart_time", "arrive_time"],
+        "properties": {
+          "flight_direction": { "type": "string", "enum": ["depart", "return"] },
+          "from_airport": { "type": "string" }, "to_airport": { "type": "string" }, "flight_no": { "type": "string" },
+          "depart_time": { "type": "string" }, "arrive_time": { "type": "string" }
+        }
+      },
+      "Period": {
+        "type": "object", "additionalProperties": false,
+        "required": ["tour_period", "price", "price_old", "Chd+B", "ChdNB", "single", "size", "Book", "AVBL", "comOffice", "comSale"],
+        "properties": {
+          "tour_period": { "type": "string" }, "price": { "type": "string", "pattern": "^[0-9]*$" },
+          "price_old": { "type": "string", "pattern": "^[0-9]*$" }, "Chd+B": { "type": "string", "pattern": "^[0-9]*$" },
+          "ChdNB": { "type": "string", "pattern": "^[0-9]*$" }, "single": { "type": "string", "pattern": "^[0-9]*$" },
+          "size": { "type": "string" }, "Book": { "type": "string" }, "AVBL": { "type": "string" },
+          "comOffice": { "type": "string" }, "comSale": { "type": "string" }
+        }
+      }
+    }
+  }
+}
